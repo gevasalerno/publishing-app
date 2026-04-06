@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Publishing Tracker</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body { font-family: sans-serif; max-width: 400px; margin: 20px auto; padding: 20px; background-color: #f0f4f8; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        h2 { margin-top: 0; color: #2c3e50; font-size: 1.2rem; }
+        input, select, button { width: 100%; padding: 14px; margin: 10px 0; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; font-size: 1rem; }
+        
+        .toggle-container { display: flex; background: #eee; border-radius: 8px; padding: 4px; margin-bottom: 10px; }
+        .toggle-btn { flex: 1; border: none; background: none; padding: 10px; cursor: pointer; border-radius: 6px; font-weight: bold; color: #666; }
+        .toggle-btn.active.expense { background: #e74c3c; color: white; }
+        .toggle-btn.active.income { background: #27ae60; color: white; }
+
+        #save-btn { background: #3498db; color: white; border: none; cursor: pointer; font-weight: bold; }
+        #save-btn:disabled { opacity: 0.5; }
+        
+        #status { font-size: 0.9em; margin-top: 10px; text-align: center; font-weight: bold; }
+        
+        .summary { margin-top: 25px; padding-top: 20px; border-top: 2px solid #eee; }
+        .summary-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 0.95rem; }
+        .net-profit { font-size: 1.2rem; font-weight: bold; margin-top: 10px; padding-top: 10px; border-top: 1px dashed #ddd; }
+        .positive { color: #27ae60; }
+        .negative { color: #e74c3c; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>Publishing Entry</h2>
+        <div class="toggle-container">
+            <button id="type-expense" class="toggle-btn active expense">Expense</button>
+            <button id="type-income" class="toggle-btn">Income</button>
+        </div>
+        
+        <input type="number" id="amount" placeholder="Amount ($)" step="0.01">
+        <input type="text" id="entity" placeholder="Source / Item">
+        
+        <select id="category">
+            <option value="General">General</option>
+            <option value="Marketing">Marketing</option>
+            <option value="Production">Production</option>
+            <option value="Software">Software</option>
+            <option value="Royalty">Royalty (Income)</option>
+        </select>
+        
+        <button id="save-btn">Save to Publishing</button>
+        <div id="status">Loading...</div>
+
+        <div class="summary">
+            <h2 id="month-label">Monthly Summary</h2>
+            <div class="summary-row"><span>Income:</span> <span id="total-income" class="positive">$0.00</span></div>
+            <div class="summary-row"><span>Expenses:</span> <span id="total-expense" class="negative">$0.00</span></div>
+            <div class="summary-row net-profit"><span>Net Profit:</span> <span id="net-profit">$0.00</span></div>
+        </div>
+    </div>
+
+    <script>
+        const supabaseUrl = 'https://dvyzsnxmgpzijsyqfhzk.supabase.co';
+        const supabaseKey = 'sb_publishable_HxWwZju2RE0jZ2JFu9FXgg_uz0kKuab';
+        const client = supabase.createClient(supabaseUrl, supabaseKey);
+
+        let currentType = 'expense';
+
+        document.getElementById('type-expense').onclick = () => setType('expense');
+        document.getElementById('type-income').onclick = () => setType('income');
+
+        function setType(type) {
+            currentType = type;
+            document.getElementById('type-expense').classList.toggle('active', type === 'expense');
+            document.getElementById('type-income').classList.toggle('active', type === 'income');
+            document.getElementById('type-expense').classList.toggle('expense', type === 'expense');
+            document.getElementById('type-income').classList.toggle('income', type === 'income');
+            document.getElementById('category').value = (type === 'income') ? 'Royalty' : 'General';
+        }
+
+        async function updateSummary() {
+            const now = new Date();
+            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+            const monthName = now.toLocaleString('default', { month: 'long' });
+            document.getElementById('month-label').innerText = `${monthName} Summary`;
+
+            const { data, error } = await client
+                .from('expenses')
+                .select('amount, type')
+                .gte('created_at', startOfMonth);
+
+            if (error) return;
+
+            let inc = 0, exp = 0;
+            data.forEach(item => {
+                if (item.type === 'income') inc += item.amount;
+                else exp += item.amount;
+            });
+
+            document.getElementById('total-income').innerText = `$${inc.toFixed(2)}`;
+            document.getElementById('total-expense').innerText = `$${exp.toFixed(2)}`;
+            const net = inc - exp;
+            const netEl = document.getElementById('net-profit');
+            netEl.innerText = `$${net.toFixed(2)}`;
+            netEl.className = net >= 0 ? 'positive' : 'negative';
+            document.getElementById('status').innerText = "Ready";
+        }
+
+        document.getElementById('save-btn').onclick = async function() {
+            const amt = document.getElementById('amount').value;
+            const ent = document.getElementById('entity').value;
+            const btn = this;
+
+            if(!amt || !ent) return;
+
+            btn.disabled = true;
+            document.getElementById('status').innerText = "Saving...";
+
+            const { error } = await client
+                .from('expenses')
+                .insert([{ 
+                    amount: parseFloat(amt), 
+                    entity: ent, 
+                    type: currentType 
+                }]);
+
+            if (error) {
+                alert("Error: " + error.message);
+            } else {
+                document.getElementById('status').innerText = "✅ Saved!";
+                document.getElementById('amount').value = '';
+                document.getElementById('entity').value = '';
+                setTimeout(updateSummary, 500);
+            }
+            btn.disabled = false;
+        };
+
+        window.onload = updateSummary;
+    </script>
+</body>
+</html>
